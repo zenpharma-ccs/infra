@@ -28,8 +28,8 @@ module "eks" {
   kubernetes_version = "1.33"
   instance_types     = ["t3.small"]
   min_size           = 1
-  max_size           = 4
-  desired_size       = 3
+  max_size           = 2
+  desired_size       = 1
 }
 
 module "rds" {
@@ -41,7 +41,7 @@ module "rds" {
   password                   = var.db_password
   vpc_id                     = module.vpc.vpc_id
   db_subnet_group_name       = module.vpc.database_subnet_group_name
-  eks_node_security_group_id = module.eks.node_security_id
+  eks_node_security_group_id = module.eks.node_security_group_id
 }
 
 module "ecr" {
@@ -70,12 +70,12 @@ module "iam" {
   env               = local.env
   oidc_provider_arn = module.eks.oidc_provider_arn
   oidc_provider_url = module.eks.cluster_oidc_issuer_url
-  aws_account_id    = data.aws_caller_identity.current.account.id
+  aws_account_id    = data.aws_caller_identity.current.account_id
   github_org        = var.github_org
 }
 
 module "secrets_manager" {
-  source = "../../modules/secrets_manager"
+  source = "../../modules/secrets-manager"
 
   project     = local.project
   env         = local.env

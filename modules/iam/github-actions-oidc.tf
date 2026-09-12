@@ -98,7 +98,7 @@ resource "aws_iam_policy" "github_actions_ci_policy" {
   })
 }
 
-resource "aws_iam_role_attachement" "github_actions_ci_policy_attachment" {
+resource "aws_iam_role_policy_attachment" "github_actions_ci_policy_attachment" {
   role       = aws_iam_role.github_actions_ci.name
   policy_arn = aws_iam_policy.github_actions_ci_policy.arn
 }
