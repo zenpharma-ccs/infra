@@ -182,7 +182,7 @@ jobs:
               -var="db_password=${{ secrets.DEV_DB_PASSWORD }}" \
               -var="jwt_secret=${{ secrets.DEV_JWT_SECRET }}" \
               -var="github_org=${{ vars.GH_ORG }}" \
-              -auto=approve
+              -auto-approve
               -no-color
           
         - name: Release state lock on failure
