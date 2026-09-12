@@ -177,6 +177,9 @@ jobs:
             aws-region: ${{ env.AWS_REGION }}
 
         - name: Terraform Init
+          run: terraform init
+
+        - name: Terraform Destroy
           run: |
             terraform destroy \
               -var="db_password=${{ secrets.DEV_DB_PASSWORD }}" \
