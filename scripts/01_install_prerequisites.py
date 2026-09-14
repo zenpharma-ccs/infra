@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 import os
 import subprocess
 import sys
@@ -15,7 +17,7 @@ def _ts():
     return datetime.now().strftime("%H:%M:%S")
 
 def log(msg): print(f"{GREEN}[{_ts()}] OK {msg}{NC}")
-def warn(msg): print(f"{YELLOW}[{_ts()}] !! |{msg}{NC}")
+def warn(msg): print(f"{YELLOW}[{_ts()}] !! {msg}{NC}")
 def info(msg): print(f"{CYAN}[{_ts()}]")
 def die(msg): 
     print(f"{RED}[{_ts()}] ERR {msg}{NC}", file=sys.stderr)
@@ -163,6 +165,139 @@ log("Helm repos updated")
 
 print()
 print("-------------------------------------------------------------")
-print("    Step s of 3: AWS Load Balancer Controller")
+print("    Step 1 of 3: AWS Load Balancer Controller")
+print("-------------------------------------------------------------")
 
+ALB_VALUES_FILE = os.path.join(GITOPS_PATH, "k8s/ingress/alb-controller-values.yaml")
+
+alb_cmd = [
+    "helm", "upgrade", "--install", "aws-load-balancer-controller",
+    "eks/aws-load-balancer-controller",
+    "--namespace", "kube-system",
+    "--set", f"clusterName={CLUSTER_NAME}",
+    "--set", f"region={AWS_REGION}",
+    "--set", f"vpcId={VPC_ID}",
+    "--set", "serviceAccount.create=true"
+    "--set", "serviceAccount.name=aws-load-balancer-controller"
+    "--set", f"serviceAccount.annotations.eks\\.amazonaws\\.com/role-arn={ALB_CONTROLLER_ROLE}",
+    "--wait", "--timeout", "5m"
+]    
+
+if os.path.isFile(ALB_VALUES_FILE):
+    alb_cmd += ["-f", ALB_VALUES_FILE]
+    info(f"Using values file: {ALB_VALUES_FILE}")
     
+run_cmd(alb_cmd)
+log("AWS Load Balancer Controller installed")
+
+alb_version, _ = run_cmd(
+    ["helm", "list", "-n", "kube-system", "--filter", "aws-load-balancer-controller", "--short"],
+    capture=True, ok_fail=True
+)
+
+log(f"Release: {alb_version or 'aws-load-balancer-controller'}")
+print("  Note: ALB hostnames are provisioned per-Ingress after ArgoCD sync apps")
+
+info("Refreshing ALB Webhook certificates...")
+for wh_type in ["mutatingwebhookconfiguration", "validatingwebhookconfiguration"]:
+    run_cmd(["kubectl", "delete", wh_type, "aws-load-balancer-webhook"], ok_fail=True)
+    
+run_cmd([
+    "helm", "upgrade", "aws-load-balancer-controller",
+    "eks/aws-load-balancer-controller",
+    "--namespace", "kube-system",
+    "--set", f"clusterName={CLUSTER_NAME}",
+    "--set", f"region={AWS_REGION}",
+    "--set", f"vpcId={VPC_ID}",
+    "--set", "serviceAccount.create=true",
+    "--set", "serviceAccount.name=aws-load-balancer-controller",
+    "--set", f"serviceAccount.annotations.eks\\.amazonaws\\.com/role-arn={ALB_CONTROLLER_ROLE}",
+    "--wait", "--timeout", "3m",   
+])
+log("ALB webhook certificates refreshed")
+
+# Step 2 - ArgoCD
+
+print()
+print("-------------------------------------------------------------")
+print("    Step 2 of 3: ArgoCD")
+print("-------------------------------------------------------------")
+
+run_cmd([
+    "helm", "upgrade", "--install", "argocd", "argocd/argo-cd",
+    "--namespace", "argocd",
+    "--create-namespace",
+    "--wait", "--timeout", "10m"
+])
+
+import base64
+argocd_password_b64, _ = run_cmd(
+    ["kubectl", "-n", "argocd", "get", "secret", "argocd-initial-admin-secret",
+     "-o", "jsonpath={.data.password}"], capture=True
+)
+argocd_password = base64.b64decode(argocd_password_b64).decode().strip()
+
+log("ArgoCD installed")
+print()
+print("-------------------------------------------------------------")
+print("    IMPORTANT: Save the ArgoCD credentials below")
+print("-------------------------------------------------------------")
+print("    Username: admin")
+print(f"   Password: {argocd_password}")
+print()
+print("    To access the ArgoCD UI:")
+print("    kubectl port-forward svc/argocd-server -n argocd 8080:443")
+print("    Then open: https://localhost:8080")
+print("-------------------------------------------------------------")
+print()
+
+ingress_file = os.path.join(GITOPS_PATH, "argocd/install/argocd-ingress.yaml")
+if(os.path.isFile(ingress_file)):
+    run_cmd(["kubectl", "apply", "-f", ingress_file])
+    log("ArgoCD ingress applied")
+    
+
+# Step 3 - External Secrets Operator
+
+print()
+print("-------------------------------------------------------------")
+print("    Step 3 of 3: External Secrets Operator")
+print("-------------------------------------------------------------")
+
+run_cmd([
+    "helm", "upgrade", "--install", "external-secrets", "external-secrets/external-secrets",
+    "--namespace", "external-secrets", 
+    "--create-namespace",
+    "--set", "installCRDs=true",
+    "--wait", "--timeout", "5m"
+])
+
+log("External Secrets Operator installed")
+
+# Verification
+
+print()
+print("-------------------------------------------------------------")
+print("    Verification")
+print("-------------------------------------------------------------")
+print()
+print("AWS Load Balancer Controller pods (namespace: kube-system):")
+run_cmd(["kubectl", "get", "pods", "-n", "kube-system",
+        "-l", "app.kubernetes.io/name=aws-load-balancer-controller"])
+print()
+print("ArgoCD pods (namespace: argocd):")
+print()
+print("External Secrets pods (namespace: external-secrets):")
+run_cmd(["kubectl", "get", "pods", "-n", "external-secrets"])
+
+print()
+log("All pre-requisites installed successfully")
+print()
+print("    Summary:")
+print(f"     ALB controller      : installed in kube-system")
+print(f"     ArgoCD pass         : {argocd_password}")
+print()
+print("    ALB hostnames will appear in 'kubectl get ingress -n <env>'")
+print("    once ArgoCD has synced your applications.")
+print()
+print("Next step: ./scripts/02_bootstrap_argocd.py")
